@@ -1,7 +1,7 @@
 %% Initialization
 clc; clear; close all;
 warning off;
-DEBUG = 0;
+DEBUG = 1;
 
 %% Functions
 crop = @(image, rowsN, colsN)(image(1:rowsN, 1:colsN));
@@ -9,7 +9,7 @@ crop = @(image, rowsN, colsN)(image(1:rowsN, 1:colsN));
 %% Variables Initialization
 original = imread('cameraman.tif');
 
-motionAmmount   = 25;                       % Ammount of linear motion in Pixels
+motionAmmount   = 13;                       % Ammount of linear motion in Pixels
 motionAngle     = 0;                        % Counterclockwise angle for motion
 
 [originalRows, originalColumns] = size(original);   % Size of original Image
@@ -40,9 +40,6 @@ title('Log of Fourier of Padded Image');
 motionFilter = fspecial('motion', motionAmmount, motionAngle);
 [motionRows, motionColumns] = size(motionFilter);
 
-% motionFilterPadded = padarray(motionFilter, [(P - motionRows - 1) / 2, (Q - motionColumns - 1) / 2]);
-% motionFilterPadded = [motionFilterPadded zeros(P - 1, 1); zeros(1, Q)];
-
 motionFilterPadded = padarray(motionFilter, [P - motionRows, Q - motionColumns], 'post');
 
 figure;
@@ -58,12 +55,9 @@ title('Fourier of Padded Motion Filter');
 %% Apply Motion Filter and make Gaussian Noise
 
 gaussianMean            = 0;        % Gaussian filter mean
-gaussianVariance        = 0.01;     % Gaussian filter variance
+gaussianVariance        = 0;     % Gaussian filter variance
 
 motionImage = imfilter(original, motionFilter, 'conv');
-
-% motionImageFourier = originalFourier .* motionFourier;
-
 motionImageFourier = fftshift(fft2(motionImage));
 
 figure;
@@ -71,13 +65,12 @@ subplot(2, 2, 1);
 imshow(log(0.01 + motionImageFourier), []);
 title('Log of Fourier of Motion Image');
 
-% motionImage = ifft2(ifftshift(motionImageFourier));
-% motionImage = motionImage(1:originalRows, 1:originalColumns);
 subplot(2, 2, 2);
 imshow(motionImage, []);
 title('IFT of Motion Image Cropped');
 
-noise = imnoise(zeros(originalRows, originalColumns), 'gaussian', gaussianMean, gaussianVariance) * 127 - 64;
+noise = double(imnoise(motionImage, 'gaussian', gaussianMean, gaussianVariance)) - double(motionImage);
+
 subplot(2, 2, 3);
 imshow(noise, []);
 title('Gaussian Additive Noise');
@@ -89,7 +82,6 @@ imshow(log(0.01 + abs(noiseFourier)), []);
 title('Fourier of Padded Noise');
 
 %% Get Final Image
-
 degradedImage = double(motionImage) + noise;
 
 figure;
@@ -110,11 +102,12 @@ end
     
 %% Pseudo-Inverse Filter
 
-coefPercent = .75;
+coefPercent = 0.7;
 
 H = motionFourier;
+
 H_prime = sort(abs(reshape(H, [1, numel(H)])));
-pseudoThreshold = H_prime(floor(coefPercent * numel(H)) + 1);
+pseudoThreshold = H_prime(floor(coefPercent .* numel(H)) + 1);
 
 pseudoInverse = (abs(H) > pseudoThreshold) .* (1./H);
 
@@ -157,6 +150,7 @@ subplot(1, 3, 3);
 imshow(restoredWiener, []);
 title('Restored Image - Wiener');
 
+%% Comparison
 
 figure;
 subplot(1, 2, 1);
