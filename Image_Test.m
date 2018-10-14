@@ -1,15 +1,16 @@
+% Group Number - p8g2
+
 %% Initialization
 clc; clear; close all;
 warning off;
-DEBUG = 1;
 
 %% Functions
 crop = @(image, rowsN, colsN)(image(1:rowsN, 1:colsN));
 
 %% Variables Initialization
-original = imread('cameraman.tif');
+original = mat2gray(imread('cameraman.tif'));
 
-motionAmmount   = 13;                       % Ammount of linear motion in Pixels
+motionAmmount   = 31;                       % Ammount of linear motion in Pixels
 motionAngle     = 0;                        % Counterclockwise angle for motion
 
 [originalRows, originalColumns] = size(original);   % Size of original Image
@@ -21,20 +22,19 @@ Q = 2 * originalColumns;
 originalPadded = padarray(original, [P - originalRows, Q - originalColumns], 'post');
 
 figure;
-subplot(2, 2, 1);
+subplot(1, 3, 1);
 imshow(original, []);
 title('Original Image');
 
-subplot(2, 2, 2);
+subplot(1, 3, 2);
 imshow(originalPadded, []);
 title('Original Image Padded');
 
 originalFourier = fftshift(fft2(originalPadded));
 
-subplot(2, 1, 2);
+subplot(1, 3, 3);
 imshow(log(0.01 + originalFourier), []);
 title('Log of Fourier of Padded Image');
-
 
 %% Motion Filter
 motionFilter = fspecial('motion', motionAmmount, motionAngle);
@@ -54,55 +54,60 @@ title('Fourier of Padded Motion Filter');
 
 %% Apply Motion Filter and make Gaussian Noise
 
-gaussianMean            = 0;        % Gaussian filter mean
-gaussianVariance        = 0;     % Gaussian filter variance
+gaussianMean            = 0;     % Gaussian filter mean
+gaussianDeviation       = 0.05;     % Gaussian filter variance
 
 motionImage = imfilter(original, motionFilter, 'conv');
-motionImageFourier = fftshift(fft2(motionImage));
+
+motionImageFourier = fftshift(fft2(padarray(motionImage, [P - motionRows Q - motionColumns], 'post')));
 
 figure;
-subplot(2, 2, 1);
+% subplot(2, 2, 1);
+imshow(motionImage, []);
+title('Motion Image applied in Space');
+
+figure;
+% subplot(2, 2, 2);
 imshow(log(0.01 + motionImageFourier), []);
 title('Log of Fourier of Motion Image');
 
-subplot(2, 2, 2);
-imshow(motionImage, []);
-title('IFT of Motion Image Cropped');
+noise = randn(size(motionImage)) * gaussianDeviation + gaussianMean; % From standard distribution to chosen distribution.
+[noiseRows, noiseColumns] = size(noise);
+noiseFourier = fftshift(fft2(padarray(noise, [P - noiseRows, Q - noiseColumns], 'post')));
 
-noise = double(imnoise(motionImage, 'gaussian', gaussianMean, gaussianVariance)) - double(motionImage);
-
-subplot(2, 2, 3);
+figure;
+% subplot(2, 2, 3);
 imshow(noise, []);
 title('Gaussian Additive Noise');
 
-[noiseRows, noiseColumns] = size(noise);
-noiseFourier = fftshift(fft2(padarray(noise, [P - noiseRows, Q - noiseColumns], 'post')));
-subplot(2, 2, 4);
+figure;
+% subplot(2, 2, 4);
 imshow(log(0.01 + abs(noiseFourier)), []);
 title('Fourier of Padded Noise');
 
 %% Get Final Image
-degradedImage = double(motionImage) + noise;
+degradedImage = motionImage + noise;
+[degradedRows, degradedColumns] = size(degradedImage);
 
 figure;
 subplot(1, 2, 1);
 imshow(degradedImage, []);
 title('Image With Motion and Noise');
 
-degradedPadded = padarray(degradedImage, [P - originalRows, Q - originalColumns], 'post');
+degradedPadded = padarray(degradedImage, [P - degradedRows, Q - degradedColumns], 'post');
 degradedFourier = fftshift(fft2(degradedPadded));
 
 subplot(1, 2, 2);
 imshow(log(0.001 + abs(degradedFourier)), []);
 
 %% DEBUGGING
-if(DEBUG == 0)
+if(1)
     close all;
 end
-    
+
 %% Pseudo-Inverse Filter
 
-coefPercent = 0.7;
+coefPercent = 0.5;
 
 H = motionFourier;
 
@@ -112,41 +117,57 @@ pseudoThreshold = H_prime(floor(coefPercent .* numel(H)) + 1);
 pseudoInverse = (abs(H) > pseudoThreshold) .* (1./H);
 
 restorationPseudoFourier = pseudoInverse .* degradedFourier;
+
 figure;
-subplot(1, 3, 1);
+subplot(2, 2, 1);
 imshow(original, []);
 title('Original Image');
 
-subplot(1, 3, 2);
+subplot(2, 2, 2);
 imshow(degradedImage, []);
 title('Degraded Image');
 
-restoredPseudo = crop(ifft2(ifftshift(restorationPseudoFourier )), originalRows, originalColumns);
+restoredPseudo = crop(ifft2(ifftshift(restorationPseudoFourier )), degradedRows, degradedColumns);
 
-subplot(1, 3, 3);
+subplot(2, 2, 3);
+imshow(log(1 + restorationPseudoFourier), []);
+title('Restored Fourier');
+
+subplot(2, 2, 4);
 imshow(restoredPseudo, []);
 title('Restored Image - Pseudo Inverse');
 
 %% Making of Wiener Filter
 
-noisePowerSpectrum = abs(noiseFourier).^2;
-originalPowerSpectrum = abs(originalFourier).^2;
-K = 0;
-wienerFilter = (1 ./ H) .* (abs(H).^2 ./ (abs(H).^2 + noisePowerSpectrum./originalPowerSpectrum));
+CHEATING = 1;
+
+if(CHEATING > 0)
+    noisePowerSpectrum = abs(noiseFourier).^2;
+    originalPowerSpectrum = abs(originalFourier).^2;
+    K = noisePowerSpectrum./originalPowerSpectrum;
+else
+    K = 50 ;
+end
+    
+wienerFilter = (1 ./ H) .* (1 ./ (1 + K ./ abs(H).^2 ));
 
 restorationWienerFourier = degradedFourier .* wienerFilter;
 figure;
-subplot(1, 3, 1);
+subplot(2, 2, 1);
 imshow(original, []);
 title('Original Image');
 
-subplot(1, 3, 2);
+subplot(2, 2, 2);
 imshow(degradedImage, []);
 title('Degraded Image');
 
-restoredWiener = crop(ifft2(ifftshift(restorationWienerFourier)), originalRows, originalColumns);
+restoredWiener = crop(ifft2(ifftshift(restorationWienerFourier)), degradedRows, degradedColumns);
 
-subplot(1, 3, 3);
+subplot(2, 2, 3);
+imshow(log(1 + restorationWienerFourier), []);
+title('Restoration Fourier');
+
+subplot(2, 2, 4);
 imshow(restoredWiener, []);
 title('Restored Image - Wiener');
 
@@ -159,3 +180,6 @@ title('Pseudo Inverse Filter');
 subplot(1, 2, 2);
 imshow(restoredWiener, []);
 title('Wiener Filter');
+
+average = fspecial('average', 5);
+averageG = imfilter(degradedFourier, average, 'conv');
